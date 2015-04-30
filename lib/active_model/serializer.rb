@@ -196,16 +196,36 @@ end
       end
     end
 
-    def embedded_in_root_associations
+    def embedded_in_root_associations(fetched_objects = {})
       associations = self.class._associations
       included_associations = filter(associations.keys)
       associations.each_with_object({}) do |(name, association), hash|
         if included_associations.include? name
           association_serializer = build_serializer(association)
+
+          if association.embed_in_root?
+            if association_serializer.is_a? ActiveModel::ArraySerializer
+              fetched_associations = fetched_objects[association.root_key] || {}
+              objects_to_serialize = association_serializer.object.map { |o| o[:id] }
+              # return if nothing to
+              no_need_to_go_on = objects_to_serialize.select { |id| fetched_associations[id].present? }.count == objects_to_serialize.count
+              next if no_need_to_go_on && objects_to_serialize != []
+            elsif association_serializer.is_a? ActiveModel::Serializer
+              fetched_associations = fetched_objects[association.root_key] || {}
+              object_to_add = association_serializer.object[:id]
+
+              no_need_to_go_on = fetched_associations[object_to_add]
+              next if no_need_to_go_on
+            end
+          end
+
           # we must do this always because even if the current association is not
           # embeded in root, it might have its own associations that are embeded in root
-          hash.merge!(association_serializer.embedded_in_root_associations) do |key, oldval, newval|
-            oldval.merge(newval) { |_, oldval, newval| [oldval, newval].flatten.uniq }
+          hash.merge!(association_serializer.embedded_in_root_associations(fetched_objects)) do |key, oldval, newval|
+            # something's broken with this bugfix for me ( https://github.com/rails-api/active_model_serializers/commit/d62463de15b98e19a8622782f9f8fb83f7c4dd89 )
+            # so i'll just comment it out and replace with what works. all comments welcome
+            # oldval.merge(newval) { |_, oldval, newval| [oldval, newval].flatten.uniq }
+            [newval, oldval].flatten.uniq
           end
 
           if association.embed_in_root?
@@ -220,6 +240,15 @@ end
             else
               hash[key] = serialized_data
             end
+
+            if fetched_objects.has_key?(key)
+              serialized_data.each do |h|
+                fetched_objects[key][h[:id]] = true
+              end
+            else
+              fetched_objects[key] = Hash[*serialized_data.map { |h| [h[:id], true] }.flatten]
+            end
+
           end
         end
       end

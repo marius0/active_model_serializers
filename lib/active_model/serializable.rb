@@ -9,8 +9,9 @@ module ActiveModel
     def as_json(options={})
       instrument('!serialize') do
         if root = options.fetch(:root, json_key)
+          fetched_objects = {}
           hash = { root => serializable_object(options) }
-          hash.merge!(serializable_data)
+          hash.merge!(serializable_data(fetched_objects))
           hash
         else
           serializable_object(options)
@@ -24,8 +25,8 @@ module ActiveModel
       end
     end
 
-    def serializable_data
-      embedded_in_root_associations.tap do |hash|
+    def serializable_data(fetched_objects = {})
+      embedded_in_root_associations(fetched_objects).tap do |hash|
         if respond_to?(:meta) && meta
           hash[meta_key] = meta
         end
@@ -36,7 +37,7 @@ module ActiveModel
       get_namespace && Utils._const_get(get_namespace)
     end
 
-    def embedded_in_root_associations
+    def embedded_in_root_associations(fetched_objects = {})
       {}
     end
 
